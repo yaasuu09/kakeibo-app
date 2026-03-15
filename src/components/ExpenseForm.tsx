@@ -34,6 +34,15 @@ export function ExpenseForm() {
   const endpointURL = "https://script.google.com/macros/s/AKfycbyqMMwjGFmRqwEN8AT_NJnIGPWCDOddlfSrCfFdxBy0dX5k2XI9hCIlXhNqxTHv4Qu3/exec";
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedPayer = localStorage.getItem("lastSelectedPayer");
+      if (savedPayer === "泰孝" || savedPayer === "沙紀") {
+        setFormData((prev) => ({ ...prev, payer: savedPayer }));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     async function fetchData() {
       try {
         // Append cache-buster to bypass aggressive mobile caching
@@ -92,14 +101,14 @@ export function ExpenseForm() {
         (window as any).lastPayload = payload;
       }
 
-      setFormData({
+      setFormData((prev) => ({
         date: getTodayJST(),
-        payer: "泰孝", // default
+        payer: prev.payer, // persist current payer
         amount: 0,
         category: "",
         store: "",
         memo: "",
-      });
+      }));
       
       setTimeout(() => setSuccess(false), 3000);
     } catch (error) {
@@ -134,7 +143,10 @@ export function ExpenseForm() {
             type="button"
             variant={formData.payer === "泰孝" ? "default" : "outline"}
             className="h-16 text-xl font-bold rounded-2xl transition-all"
-            onClick={() => setFormData({ ...formData, payer: "泰孝" })}
+            onClick={() => {
+              setFormData({ ...formData, payer: "泰孝" });
+              localStorage.setItem("lastSelectedPayer", "泰孝");
+            }}
           >
             泰孝
           </Button>
@@ -142,7 +154,10 @@ export function ExpenseForm() {
             type="button"
             variant={formData.payer === "沙紀" ? "default" : "outline"}
             className="h-16 text-xl font-bold rounded-2xl transition-all"
-            onClick={() => setFormData({ ...formData, payer: "沙紀" })}
+            onClick={() => {
+              setFormData({ ...formData, payer: "沙紀" });
+              localStorage.setItem("lastSelectedPayer", "沙紀");
+            }}
           >
             沙紀
           </Button>
