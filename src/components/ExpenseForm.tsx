@@ -5,6 +5,7 @@ import { getTodayJST, formatPayload, ExpenseFormData } from "@/lib/logic";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StoreCombobox } from "@/components/StoreCombobox";
 import {
   Select,
   SelectContent,
@@ -12,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
 export function ExpenseForm() {
   const [formData, setFormData] = useState<ExpenseFormData>({
     date: getTodayJST(),
@@ -199,21 +199,12 @@ export function ExpenseForm() {
       {/* Store */}
       <div className="space-y-2">
         <Label htmlFor="store">購入先 / 店名</Label>
-        <Input
-          id="store"
-          type="text"
-          list="stores-list"
-          placeholder={isLoading ? "読み込み中..." : "例: スーパー、Amazon"}
+        <StoreCombobox
+          options={stores}
           value={formData.store || ""}
-          onChange={(e) => setFormData({ ...formData, store: e.target.value })}
-          className="text-lg h-14"
-          disabled={isLoading}
+          onChange={(val) => setFormData({ ...formData, store: val })}
+          isLoading={isLoading}
         />
-        <datalist id="stores-list">
-          {stores.map((store, i) => (
-            <option key={i} value={store} />
-          ))}
-        </datalist>
       </div>
 
       {/* Memo */}
