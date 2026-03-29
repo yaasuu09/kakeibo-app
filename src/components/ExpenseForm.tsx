@@ -92,6 +92,11 @@ export function ExpenseForm() {
       if (!response.ok) {
         throw new Error("ネットワークエラーが発生しました");
       }
+
+      const resData = await response.json();
+      if (resData.status === "error") {
+         throw new Error("GAS側エラー: " + resData.message);
+      }
       
       // Reset form after successful submission
       setSuccess(true);
@@ -111,9 +116,9 @@ export function ExpenseForm() {
       }));
       
       setTimeout(() => setSuccess(false), 3000);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("エラーが発生しました。");
+      alert(error.message || "エラーが発生しました。");
     } finally {
       setIsSubmitting(false);
     }
