@@ -77,17 +77,20 @@ export function formatPayload(data: ExpenseFormData): Payload {
 export const DRAFT_STORAGE_KEY = "kakeibo_expense_draft";
 
 /**
- * Sends payload to GAS with exponential backoff retries.
+ * Sends payload to GAS with timeout and fast retries.
  */
 export async function sendExpenseWithRetry(
   url: string,
   payload: Payload,
-  maxRetries = 3,
+  maxRetries = 2,
   onRetry?: (attempt: number, error: unknown) => void
 ): Promise<{ status: string; message: string }> {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+
     try {
       const response = await fetch(url, {
         method: "POST",
@@ -95,7 +98,10 @@ export async function sendExpenseWithRetry(
         headers: {
           "Content-Type": "text/plain;charset=utf-8",
         },
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTPエラー (${response.status})`);
@@ -108,18 +114,22 @@ export async function sendExpenseWithRetry(
 
       return resData;
     } catch (err: unknown) {
+      clearTimeout(timeoutId);
       lastError = err;
       if (attempt < maxRetries) {
         if (onRetry) {
           onRetry(attempt, err);
         }
-        // 指数バックオフ (1秒, 2秒...)
-        await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+        // 高速リトライ (500ms待機)
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
   }
 
   if (lastError instanceof Error) {
+    if (lastError.name === "AbortError") {
+      throw new Error("通信がタイムアウトしました。電波の良い場所で再送信をお試しください。");
+    }
     throw lastError;
   }
   throw new Error("ネットワーク通信に失敗しました。電波の良い場所で再試行してください。");

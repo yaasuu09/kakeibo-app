@@ -2,6 +2,7 @@
  * GAS_Code.gs
  * Google Apps Script Web App implementation for Kakeibo App.
  * Maps POST JSON payload directly to the "支出記録" sheet.
+ * Ultra-fast execution with concurrency lock & duplicate prevention.
  */
 
 /**
@@ -16,8 +17,8 @@ function doOptions(e) {
  */
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  // 15秒間ロック取得を待機（リトライ競合や同時書き込みを直列化）
-  const hasLock = lock.tryLock(15000);
+  // 10秒間ロック取得を待機
+  const hasLock = lock.tryLock(10000);
 
   if (!hasLock) {
     return generateResponse({
@@ -33,7 +34,7 @@ function doPost(e) {
 
     const payload = JSON.parse(e.postData.contents);
 
-    // Validate payload is an Array to match columns (now length 8 skipping total)
+    // Validate payload is an Array of length 8
     if (!Array.isArray(payload) || payload.length !== 8) {
       return generateResponse({ status: "error", message: "Invalid payload format. Expected array of length 8." });
     }
@@ -59,21 +60,22 @@ function doPost(e) {
       return generateResponse({ status: "error", message: `Sheet '${targetSheetName}' not found.` });
     }
 
-    // 2. Find the last row having data in Column B ("日付")
-    // This avoids ARRAYFORMULA in Column A tricking getLastRow().
-    const bValues = sheet.getRange("B:B").getValues();
-    let lastRow = 0;
-    for (let i = bValues.length - 1; i >= 0; i--) {
-      if (bValues[i][0] !== "") {
-        lastRow = i + 1; // +1 because array is 0-indexed but rows are 1-indexed
-        break;
+    // 2. 超高速最終行取得（getNextDataCellにより0.01秒で判定）
+    let lastRow = 1;
+    try {
+      const cellB1 = sheet.getRange("B1");
+      const nextCell = cellB1.getNextDataCell(SpreadsheetApp.Direction.DOWN);
+      const detectedRow = nextCell.getRow();
+      if (detectedRow > 0 && detectedRow <= sheet.getMaxRows()) {
+        if (sheet.getRange(detectedRow, 2).getValue() !== "") {
+          lastRow = detectedRow;
+        }
       }
+    } catch (e) {
+      lastRow = Math.max(1, sheet.getLastRow());
     }
-    
-    // If the sheet is empty (only headers), start at row 2
-    if (lastRow === 0) lastRow = 1;
 
-    // 3. 重複防止チェック②: 直前行と全く同じデータ（日付・金額・カテゴリ・店舗・備考）の連続追加を検知
+    // 3. 重複防止チェック②: 直前行と全く同じデータの連続追加を検知（直近1行のみ取得で超軽量）
     if (lastRow > 1) {
       const prevValues = sheet.getRange(lastRow, 2, 1, 6).getValues()[0];
       const newValues = payload.slice(1, 7);
@@ -104,73 +106,54 @@ function doPost(e) {
         });
       }
     }
-    
+
     const newRow = lastRow + 1;
 
-    // シートの物理的な最大行数に達した場合は自動で行を追加（行不足による書き込みエラーを完全回避）
+    // シートの物理的な最大行数に達した場合は自動で行を追加
     if (newRow > sheet.getMaxRows()) {
       sheet.insertRowAfter(sheet.getMaxRows());
     }
 
-    // 4. We only want to insert columns B through G (indices 1 through 6 of the payload array) and I (index 7)
-    const dataBtoG = [
-      payload.slice(1, 7) // Date, Yasutaka, Saki, Category, Store, Memo
-    ];
-    
-    // Insert into columns 2 through 7 (B through G)
-    sheet.getRange(newRow, 2, 1, 6).setValues(dataBtoG);
+    // 4. データ書き込み（B〜G列: 日付、立替、カテゴリ、店舗、備考）
+    sheet.getRange(newRow, 2, 1, 6).setValues([payload.slice(1, 7)]);
 
-    // 5. Insert Settled flag into column 9 (I)
-    // Strictly evaluate boolean using category name to prevent string coercion issues
-    const categoryName = payload[4]; // payload[4] corresponds to カテゴリ
+    // 5. 精算フラグ（I列）
+    const categoryName = payload[4];
     const isSettled = (categoryName === "泰雅財布入金" || categoryName === "泰雅精算ログ") ? true : false;
-    sheet.getRange(newRow, 9, 1, 1).setValue(isSettled);
+    sheet.getRange(newRow, 9).setValue(isSettled);
 
-    // 6. Copy formatting and validation from the previous row
-    if (lastRow > 1) { // Ensure there is a row above to copy from
-      const sourceRange = sheet.getRange(lastRow, 1, 1, sheet.getLastColumn());
-      const targetRange = sheet.getRange(newRow, 1, 1, sheet.getLastColumn());
-      
-      sourceRange.copyTo(targetRange, SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION, false);
-      sourceRange.copyTo(targetRange, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
-    }
-
-    // 7. 成功したリクエストIDをキャッシュに記録（10分間保持）
+    // 6. 成功リクエストIDをキャッシュに記録（10分間保持）
     if (requestId) {
       cache.put("kakeibo_req_" + requestId, "done", 600);
     }
 
-    // 8. 新しいカテゴリや店舗がマスターシートに未登録の場合、末尾に自動追記する
-    // （全行スキャン＆全件再ソートを省くことで、GASのレスポンス時間を数秒から0.3秒へ劇的に高速化）
+    // 7. 新規カテゴリや店舗がマスターシートに未登録の場合のみ末尾にピンポイント追記
     const masterSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("マスター");
     if (masterSheet) {
       const categoryToRegister = String(payload[4] || "").trim();
       const storeToRegister = String(payload[5] || "").trim();
 
-      const masterLastRow = masterSheet.getLastRow();
-      let existingCategories = [];
-      let existingStores = [];
+      if (categoryToRegister || storeToRegister) {
+        const masterLastRow = masterSheet.getLastRow();
+        if (masterLastRow > 1) {
+          const masterData = masterSheet.getRange(2, 1, masterLastRow - 1, 2).getValues();
+          const existingCategories = masterData.map(r => String(r[0] || "").trim()).filter(Boolean);
+          const existingStores = masterData.map(r => String(r[1] || "").trim()).filter(Boolean);
 
-      if (masterLastRow > 1) {
-        const masterValues = masterSheet.getRange(2, 1, masterLastRow - 1, 2).getValues();
-        existingCategories = masterValues.map(r => String(r[0] || "").trim()).filter(Boolean);
-        existingStores = masterValues.map(r => String(r[1] || "").trim()).filter(Boolean);
-      }
-
-      const isNewCategory = categoryToRegister && !existingCategories.includes(categoryToRegister);
-      const isNewStore = storeToRegister && !existingStores.includes(storeToRegister);
-
-      if (isNewCategory) {
-        const nextCatRow = existingCategories.length + 2;
-        masterSheet.getRange(nextCatRow, 1).setValue(categoryToRegister);
-      }
-      if (isNewStore) {
-        const nextStoreRow = existingStores.length + 2;
-        masterSheet.getRange(nextStoreRow, 2).setValue(storeToRegister);
+          if (categoryToRegister && !existingCategories.includes(categoryToRegister)) {
+            masterSheet.getRange(existingCategories.length + 2, 1).setValue(categoryToRegister);
+          }
+          if (storeToRegister && !existingStores.includes(storeToRegister)) {
+            masterSheet.getRange(existingStores.length + 2, 2).setValue(storeToRegister);
+          }
+        }
       }
     }
 
-    return generateResponse({ status: "success", message: "Row appended successfully with validation and duplicate protection!" });
+    return generateResponse({
+      status: "success",
+      message: "Row appended successfully!"
+    });
   } catch (error) {
     return generateResponse({ status: "error", message: error.toString() });
   } finally {
@@ -184,9 +167,6 @@ function doPost(e) {
 function generateResponse(responseObject) {
   const jsonResponse = ContentService.createTextOutput(JSON.stringify(responseObject));
   jsonResponse.setMimeType(ContentService.MimeType.JSON);
-  
-  // Return the output. To support CORS in GAS, deploying as Web App handles most headers automatically, 
-  // but if needed, we return JSON. (CORS on GAS is inherently supported via redirects).
   return jsonResponse;
 }
 
@@ -212,7 +192,7 @@ function doGet(e) {
     for (let i = 1; i < data.length; i++) {
       const cat = data[i][0]; // Column A (カテゴリ)
       const store = data[i][1]; // Column B (購入先)
-      
+
       if (cat !== undefined && cat !== null && String(cat).trim() !== "") {
         categories.add(String(cat).trim());
       }

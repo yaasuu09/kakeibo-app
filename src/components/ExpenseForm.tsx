@@ -234,13 +234,13 @@ export function ExpenseForm() {
       const payload = formatPayload(formData);
       console.log("Sending payload:", payload);
       
-      // Resilient exponential backoff retry
+      // Resilient fast retry
       await sendExpenseWithRetry(
         endpointURL,
         payload,
-        3,
+        2,
         (attempt) => {
-          setRetryStatus(`通信が不安定なため自動再試行中 (${attempt}/3)...`);
+          setRetryStatus(`通信が不安定なため自動再試行中 (${attempt}/2)...`);
         }
       );
       
