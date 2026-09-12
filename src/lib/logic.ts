@@ -121,3 +121,48 @@ export async function sendExpenseWithRetry(
 
   throw lastError || new Error("ネットワーク通信に失敗しました。電波の良い場所で再試行してください。");
 }
+
+/**
+ * Safely evaluates a simple math expression like "120+350" or "1000 - 200".
+ * Returns the computed integer, or null if invalid.
+ */
+export function evaluateMathExpression(input: string): number | null {
+  const cleaned = input.replace(/\s+/g, "").replace(/,/g, "");
+  if (!cleaned) return null;
+  
+  // Only allow digits, +, -, *, /, and decimals
+  if (!/^[0-9+\-*/.]+$/.test(cleaned)) {
+    return null;
+  }
+
+  // Avoid trailing operators (e.g. "120+")
+  if (/[+\-*/.]$/.test(cleaned)) {
+    return null;
+  }
+
+  try {
+    // Split and compute additions and subtractions safely without eval
+    // Simple tokenizer for numbers and +/- operators
+    const tokens = cleaned.match(/([0-9.]+|[+\-*/])/g);
+    if (!tokens) return null;
+
+    let total = 0;
+    let currentOp = "+";
+
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      if (token === "+" || token === "-") {
+        currentOp = token;
+      } else {
+        const num = parseFloat(token);
+        if (isNaN(num)) return null;
+        if (currentOp === "+") total += num;
+        else if (currentOp === "-") total -= num;
+      }
+    }
+
+    return Math.round(total);
+  } catch {
+    return null;
+  }
+}

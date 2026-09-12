@@ -7,6 +7,7 @@ import {
   ExpenseFormData,
   sendExpenseWithRetry,
   DRAFT_STORAGE_KEY,
+  evaluateMathExpression,
 } from "@/lib/logic";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+// Helper for haptic vibration feedback on mobile
+function triggerHaptic(duration = 12) {
+  if (typeof window !== "undefined" && "vibrate" in navigator) {
+    try {
+      navigator.vibrate(duration);
+    } catch {
+      // Ignore if not supported
+    }
+  }
+}
+
 export function ExpenseForm() {
   const [formData, setFormData] = useState<ExpenseFormData>({
     date: getTodayJST(),
@@ -29,6 +41,9 @@ export function ExpenseForm() {
     store: "",
     memo: "",
   });
+
+  // Raw text input for amount to allow expressions like "120+350"
+  const [amountRawInput, setAmountRawInput] = useState<string>("");
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [retryStatus, setRetryStatus] = useState<string | null>(null);
@@ -41,7 +56,7 @@ export function ExpenseForm() {
   const [isLoading, setIsLoading] = useState(true);
   const isInitialized = useRef(false);
 
-  // GAS Web App URL provided by the user
+  // GAS Web App URL
   const endpointURL = "https://script.google.com/macros/s/AKfycbyqMMwjGFmRqwEN8AT_NJnIGPWCDOddlfSrCfFdxBy0dX5k2XI9hCIlXhNqxTHv4Qu3/exec";
 
   // 1. Initial Mount: Restore draft if available, otherwise restore last selected payer
@@ -57,6 +72,9 @@ export function ExpenseForm() {
               ...parsed,
               date: parsed.date || getTodayJST(),
             }));
+            if (parsed.amount > 0) {
+              setAmountRawInput(String(parsed.amount));
+            }
             if (parsed.amount > 0 || parsed.category || parsed.store || parsed.memo) {
               setIsDraftRestored(true);
             }
@@ -116,13 +134,56 @@ export function ExpenseForm() {
     fetchData();
   }, [endpointURL]);
 
+  // Calculate live preview of expression
+  const calculatedPreview = (() => {
+    if (!amountRawInput) return null;
+    if (amountRawInput.includes("+") || amountRawInput.includes("-")) {
+      const evaluated = evaluateMathExpression(amountRawInput);
+      return evaluated !== null && evaluated !== Number(amountRawInput) ? evaluated : null;
+    }
+    return null;
+  })();
+
+  // Handle amount raw change
+  const handleAmountChange = (val: string) => {
+    setAmountRawInput(val);
+    const evaluated = evaluateMathExpression(val);
+    if (evaluated !== null) {
+      setFormData((prev) => ({ ...prev, amount: evaluated }));
+    } else if (val === "") {
+      setFormData((prev) => ({ ...prev, amount: 0 }));
+    }
+  };
+
+  // On blur, resolve expression to single number
+  const handleAmountBlur = () => {
+    if (amountRawInput) {
+      const evaluated = evaluateMathExpression(amountRawInput);
+      if (evaluated !== null && evaluated > 0) {
+        setAmountRawInput(String(evaluated));
+        setFormData((prev) => ({ ...prev, amount: evaluated }));
+      }
+    }
+  };
+
+  // Quick addition chips (+100, +500, +1000, +5000)
+  const handleQuickAdd = (addVal: number) => {
+    triggerHaptic(10);
+    const current = formData.amount || 0;
+    const next = current + addVal;
+    setFormData((prev) => ({ ...prev, amount: next }));
+    setAmountRawInput(String(next));
+  };
+
   // Clear draft and reset form
   const handleClearDraft = () => {
+    triggerHaptic(20);
     if (typeof window !== "undefined") {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
     }
     setIsDraftRestored(false);
     setErrorMessage(null);
+    setAmountRawInput("");
     setFormData((prev) => ({
       date: getTodayJST(),
       payer: prev.payer,
@@ -135,15 +196,28 @@ export function ExpenseForm() {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!formData.amount || !formData.category) return;
+    
+    // Resolve math expression before submit if needed
+    let finalAmount = formData.amount;
+    if (amountRawInput) {
+      const evaluated = evaluateMathExpression(amountRawInput);
+      if (evaluated !== null && evaluated > 0) {
+        finalAmount = evaluated;
+        setAmountRawInput(String(evaluated));
+        setFormData((prev) => ({ ...prev, amount: evaluated }));
+      }
+    }
 
+    if (!finalAmount || !formData.category) return;
+
+    triggerHaptic(15);
     setIsSubmitting(true);
     setRetryStatus(null);
     setErrorMessage(null);
     setSuccess(false);
 
     try {
-      const payload = formatPayload(formData);
+      const payload = formatPayload({ ...formData, amount: finalAmount });
       console.log("Sending payload:", payload);
       
       // Resilient exponential backoff retry
@@ -157,8 +231,11 @@ export function ExpenseForm() {
       );
       
       // Successfully submitted! Clear draft & reset form
+      triggerHaptic(40);
       setSuccess(true);
       setIsDraftRestored(false);
+      setAmountRawInput("");
+      
       if (typeof window !== "undefined") {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
         (window as any).lastPayload = payload;
@@ -175,8 +252,8 @@ export function ExpenseForm() {
       
       setTimeout(() => setSuccess(false), 3500);
     } catch (error: any) {
+      triggerHaptic(50);
       console.error("Submission failed:", error);
-      // Keep all form data intact in state and localStorage
       setErrorMessage(
         error.message || "送信に失敗しました。入力内容は保持されていますので、電波の良い場所で再度お試しください。"
       );
@@ -185,6 +262,10 @@ export function ExpenseForm() {
       setRetryStatus(null);
     }
   };
+
+  // Top quick suggestions (categories and stores)
+  const topCategories = categories.slice(0, 6);
+  const topStores = stores.slice(0, 6);
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto p-4 animate-in fade-in duration-500">
@@ -248,8 +329,9 @@ export function ExpenseForm() {
           <Button
             type="button"
             variant={formData.payer === "泰孝" ? "default" : "outline"}
-            className="h-16 text-xl font-bold rounded-2xl transition-all"
+            className="h-16 text-xl font-bold rounded-2xl transition-all shadow-sm active:scale-[0.98]"
             onClick={() => {
+              triggerHaptic(10);
               setFormData({ ...formData, payer: "泰孝" });
               if (typeof window !== "undefined") {
                 localStorage.setItem("lastSelectedPayer", "泰孝");
@@ -261,8 +343,9 @@ export function ExpenseForm() {
           <Button
             type="button"
             variant={formData.payer === "沙紀" ? "default" : "outline"}
-            className="h-16 text-xl font-bold rounded-2xl transition-all"
+            className="h-16 text-xl font-bold rounded-2xl transition-all shadow-sm active:scale-[0.98]"
             onClick={() => {
+              triggerHaptic(10);
               setFormData({ ...formData, payer: "沙紀" });
               if (typeof window !== "undefined") {
                 localStorage.setItem("lastSelectedPayer", "沙紀");
@@ -274,7 +357,7 @@ export function ExpenseForm() {
         </div>
       </div>
 
-      {/* Amount Keypad Style Input */}
+      {/* Amount (Smart Calculator & Keypad Style Input) */}
       <div className="space-y-2">
         <div className="flex justify-between items-center">
           <Label htmlFor="amount">金額 (¥)</Label>
@@ -283,21 +366,73 @@ export function ExpenseForm() {
             下書き自動保存
           </span>
         </div>
-        <Input
-          id="amount"
-          type="number"
-          inputMode="numeric"
-          placeholder="0"
-          value={formData.amount === 0 ? "" : formData.amount}
-          required
-          onChange={(e) => setFormData({ ...formData, amount: Number(e.target.value) })}
-          className="text-4xl text-right font-bold h-20 placeholder:text-muted-foreground/50 rounded-2xl shadow-inner"
-        />
+
+        <div className="relative">
+          <Input
+            id="amount"
+            type="text"
+            inputMode="decimal"
+            placeholder="0 (例: 120+350)"
+            value={amountRawInput}
+            required
+            onChange={(e) => handleAmountChange(e.target.value)}
+            onBlur={handleAmountBlur}
+            className="text-3xl text-right font-bold h-20 placeholder:text-muted-foreground/40 rounded-2xl pr-4 shadow-inner tracking-wider"
+          />
+          {/* Live Math Expression Calculation Preview */}
+          {calculatedPreview !== null && (
+            <div className="absolute left-3 bottom-2.5 text-xs font-semibold px-2 py-1 bg-primary/10 text-primary rounded-lg animate-in fade-in">
+              = ¥{calculatedPreview.toLocaleString()}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Addition Chips */}
+        <div className="flex items-center gap-2 pt-1 overflow-x-auto pb-1 no-scrollbar">
+          <span className="text-xs text-muted-foreground whitespace-nowrap pl-1">加算:</span>
+          {[100, 500, 1000, 5000].map((addVal) => (
+            <button
+              key={addVal}
+              type="button"
+              onClick={() => handleQuickAdd(addVal)}
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-secondary/80 hover:bg-secondary active:scale-95 text-secondary-foreground border transition-all whitespace-nowrap"
+            >
+              +{addVal.toLocaleString()}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Category Dropdown */}
+      {/* Category Dropdown & Quick Preset Chips */}
       <div className="space-y-2">
         <Label htmlFor="category">カテゴリ</Label>
+
+        {/* Quick Category Chips */}
+        {topCategories.length > 0 && (
+          <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
+            {topCategories.map((cat) => {
+              const isSelected = formData.category === cat;
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(10);
+                    setFormData({ ...formData, category: cat });
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap border ${
+                    isSelected
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-muted/60 text-muted-foreground hover:bg-muted border-transparent hover:text-foreground"
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <Select
           required
           value={formData.category}
@@ -305,7 +440,7 @@ export function ExpenseForm() {
           disabled={isLoading}
         >
           <SelectTrigger className="h-14 text-lg">
-            <SelectValue placeholder={isLoading ? "読み込み中..." : "カテゴリを選択"} />
+            <SelectValue placeholder={isLoading ? "読み込み中..." : "その他のカテゴリを選択"} />
           </SelectTrigger>
           <SelectContent>
             {categories.map((cat) => (
@@ -317,9 +452,36 @@ export function ExpenseForm() {
         </Select>
       </div>
 
-      {/* Store */}
+      {/* Store & Quick Store Chips */}
       <div className="space-y-2">
         <Label htmlFor="store">購入先 / 店名</Label>
+
+        {/* Quick Store Chips */}
+        {topStores.length > 0 && (
+          <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
+            {topStores.map((store) => {
+              const isSelected = formData.store === store;
+              return (
+                <button
+                  key={store}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(10);
+                    setFormData({ ...formData, store });
+                  }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap border ${
+                    isSelected
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-muted/60 text-muted-foreground hover:bg-muted border-transparent hover:text-foreground"
+                  }`}
+                >
+                  {store}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <StoreCombobox
           options={stores}
           value={formData.store || ""}
@@ -343,7 +505,7 @@ export function ExpenseForm() {
 
       {/* Retry Progress Indicator (when retrying) */}
       {retryStatus && (
-        <div className="p-3 bg-primary/10 border border-primary/20 rounded-xl text-primary text-sm font-medium text-center animate-pulse">
+        <div className="p-3.5 bg-primary/10 border border-primary/20 rounded-2xl text-primary text-sm font-medium text-center animate-pulse">
           {retryStatus}
         </div>
       )}
@@ -352,7 +514,7 @@ export function ExpenseForm() {
       <Button 
         type="submit" 
         disabled={isSubmitting || !formData.amount || !formData.category}
-        className={`w-full h-16 text-xl font-bold rounded-2xl mt-8 transition-all shadow-md ${
+        className={`w-full h-16 text-xl font-bold rounded-2xl mt-8 transition-all shadow-md active:scale-[0.98] ${
           success ? "bg-green-600 hover:bg-green-700 text-white" : ""
         }`}
       >
