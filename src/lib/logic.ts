@@ -39,9 +39,9 @@ export function formatPayload(data: ExpenseFormData): Payload {
     throw new Error("Amount and Category are required.");
   }
 
-  // Generate ID
-  const random4 = Math.floor(1000 + Math.random() * 9000).toString();
-  const id = `${data.date}-${random4}`;
+  // Generate Unique Request ID (Date + timestamp + random string)
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = `${data.date}-${uniqueSuffix}`;
 
   // Apply Business Logic
   let processedAmount = data.amount;
@@ -83,9 +83,9 @@ export async function sendExpenseWithRetry(
   url: string,
   payload: Payload,
   maxRetries = 3,
-  onRetry?: (attempt: number, error: any) => void
+  onRetry?: (attempt: number, error: unknown) => void
 ): Promise<{ status: string; message: string }> {
-  let lastError: any = null;
+  let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -101,13 +101,13 @@ export async function sendExpenseWithRetry(
         throw new Error(`HTTPエラー (${response.status})`);
       }
 
-      const resData = await response.json();
+      const resData = (await response.json()) as { status: string; message: string };
       if (resData.status === "error") {
         throw new Error("GAS側エラー: " + (resData.message || "処理に失敗しました"));
       }
 
       return resData;
-    } catch (err: any) {
+    } catch (err: unknown) {
       lastError = err;
       if (attempt < maxRetries) {
         if (onRetry) {
@@ -119,52 +119,10 @@ export async function sendExpenseWithRetry(
     }
   }
 
-  throw lastError || new Error("ネットワーク通信に失敗しました。電波の良い場所で再試行してください。");
-}
-
-/**
- * Safely evaluates a simple math expression like "120+350" or "1000 - 200".
- * Returns the computed integer, or null if invalid.
- */
-export function evaluateMathExpression(input: string): number | null {
-  const cleaned = input.replace(/\s+/g, "").replace(/,/g, "");
-  if (!cleaned) return null;
-  
-  // Only allow digits, +, -, *, /, and decimals
-  if (!/^[0-9+\-*/.]+$/.test(cleaned)) {
-    return null;
+  if (lastError instanceof Error) {
+    throw lastError;
   }
-
-  // Avoid trailing operators (e.g. "120+")
-  if (/[+\-*/.]$/.test(cleaned)) {
-    return null;
-  }
-
-  try {
-    // Split and compute additions and subtractions safely without eval
-    // Simple tokenizer for numbers and +/- operators
-    const tokens = cleaned.match(/([0-9.]+|[+\-*/])/g);
-    if (!tokens) return null;
-
-    let total = 0;
-    let currentOp = "+";
-
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      if (token === "+" || token === "-") {
-        currentOp = token;
-      } else {
-        const num = parseFloat(token);
-        if (isNaN(num)) return null;
-        if (currentOp === "+") total += num;
-        else if (currentOp === "-") total -= num;
-      }
-    }
-
-    return Math.round(total);
-  } catch {
-    return null;
-  }
+  throw new Error("ネットワーク通信に失敗しました。電波の良い場所で再試行してください。");
 }
 
 export const USAGE_STORAGE_KEY = "kakeibo_usage_counts";

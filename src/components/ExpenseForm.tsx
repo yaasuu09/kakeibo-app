@@ -186,7 +186,6 @@ export function ExpenseForm() {
       
       if (typeof window !== "undefined") {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
-        (window as any).lastPayload = payload;
       }
 
       setFormData((prev) => ({
@@ -199,12 +198,14 @@ export function ExpenseForm() {
       }));
       
       setTimeout(() => setSuccess(false), 3500);
-    } catch (error: any) {
+    } catch (error: unknown) {
       triggerHaptic(50);
       console.error("Submission failed:", error);
-      setErrorMessage(
-        error.message || "送信に失敗しました。入力内容は保持されていますので、電波の良い場所で再度お試しください。"
-      );
+      const message =
+        error instanceof Error
+          ? error.message
+          : "送信に失敗しました。入力内容は保持されていますので、電波の良い場所で再度お試しください。";
+      setErrorMessage(message);
     } finally {
       setIsSubmitting(false);
       setRetryStatus(null);
@@ -479,13 +480,6 @@ export function ExpenseForm() {
             入力内容をリセット
           </button>
         </div>
-      )}
-
-      {/* Debug Payload for Testing */}
-      {success && (
-        <pre id="debug-payload" className="text-xs mt-4 p-4 bg-muted rounded overflow-auto">
-          {JSON.stringify((typeof window !== 'undefined' ? (window as any).lastPayload : []), null, 2)}
-        </pre>
       )}
     </form>
   );
