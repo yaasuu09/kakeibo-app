@@ -108,6 +108,11 @@ function doPost(e) {
     
     const newRow = lastRow + 1;
 
+    // シートの物理的な最大行数に達した場合は自動で行を追加（行不足による書き込みエラーを完全回避）
+    if (newRow > sheet.getMaxRows()) {
+      sheet.insertRowAfter(sheet.getMaxRows());
+    }
+
     // 4. We only want to insert columns B through G (indices 1 through 6 of the payload array) and I (index 7)
     const dataBtoG = [
       payload.slice(1, 7) // Date, Yasutaka, Saki, Category, Store, Memo
