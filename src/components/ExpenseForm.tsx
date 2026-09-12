@@ -7,7 +7,6 @@ import {
   ExpenseFormData,
   sendExpenseWithRetry,
   DRAFT_STORAGE_KEY,
-  evaluateMathExpression,
 } from "@/lib/logic";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,9 +40,6 @@ export function ExpenseForm() {
     store: "",
     memo: "",
   });
-
-  // Raw text input for amount to allow expressions like "120+350"
-  const [amountRawInput, setAmountRawInput] = useState<string>("");
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [retryStatus, setRetryStatus] = useState<string | null>(null);
@@ -72,9 +68,6 @@ export function ExpenseForm() {
               ...parsed,
               date: parsed.date || getTodayJST(),
             }));
-            if (parsed.amount > 0) {
-              setAmountRawInput(String(parsed.amount));
-            }
             if (parsed.amount > 0 || parsed.category || parsed.store || parsed.memo) {
               setIsDraftRestored(true);
             }
@@ -134,47 +127,6 @@ export function ExpenseForm() {
     fetchData();
   }, [endpointURL]);
 
-  // Calculate live preview of expression
-  const calculatedPreview = (() => {
-    if (!amountRawInput) return null;
-    if (amountRawInput.includes("+") || amountRawInput.includes("-")) {
-      const evaluated = evaluateMathExpression(amountRawInput);
-      return evaluated !== null && evaluated !== Number(amountRawInput) ? evaluated : null;
-    }
-    return null;
-  })();
-
-  // Handle amount raw change
-  const handleAmountChange = (val: string) => {
-    setAmountRawInput(val);
-    const evaluated = evaluateMathExpression(val);
-    if (evaluated !== null) {
-      setFormData((prev) => ({ ...prev, amount: evaluated }));
-    } else if (val === "") {
-      setFormData((prev) => ({ ...prev, amount: 0 }));
-    }
-  };
-
-  // On blur, resolve expression to single number
-  const handleAmountBlur = () => {
-    if (amountRawInput) {
-      const evaluated = evaluateMathExpression(amountRawInput);
-      if (evaluated !== null && evaluated > 0) {
-        setAmountRawInput(String(evaluated));
-        setFormData((prev) => ({ ...prev, amount: evaluated }));
-      }
-    }
-  };
-
-  // Quick addition chips (+100, +500, +1000, +5000)
-  const handleQuickAdd = (addVal: number) => {
-    triggerHaptic(10);
-    const current = formData.amount || 0;
-    const next = current + addVal;
-    setFormData((prev) => ({ ...prev, amount: next }));
-    setAmountRawInput(String(next));
-  };
-
   // Clear draft and reset form
   const handleClearDraft = () => {
     triggerHaptic(20);
@@ -183,7 +135,6 @@ export function ExpenseForm() {
     }
     setIsDraftRestored(false);
     setErrorMessage(null);
-    setAmountRawInput("");
     setFormData((prev) => ({
       date: getTodayJST(),
       payer: prev.payer,
@@ -196,19 +147,7 @@ export function ExpenseForm() {
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    
-    // Resolve math expression before submit if needed
-    let finalAmount = formData.amount;
-    if (amountRawInput) {
-      const evaluated = evaluateMathExpression(amountRawInput);
-      if (evaluated !== null && evaluated > 0) {
-        finalAmount = evaluated;
-        setAmountRawInput(String(evaluated));
-        setFormData((prev) => ({ ...prev, amount: evaluated }));
-      }
-    }
-
-    if (!finalAmount || !formData.category) return;
+    if (!formData.amount || !formData.category) return;
 
     triggerHaptic(15);
     setIsSubmitting(true);
@@ -217,7 +156,7 @@ export function ExpenseForm() {
     setSuccess(false);
 
     try {
-      const payload = formatPayload({ ...formData, amount: finalAmount });
+      const payload = formatPayload(formData);
       console.log("Sending payload:", payload);
       
       // Resilient exponential backoff retry
@@ -234,7 +173,6 @@ export function ExpenseForm() {
       triggerHaptic(40);
       setSuccess(true);
       setIsDraftRestored(false);
-      setAmountRawInput("");
       
       if (typeof window !== "undefined") {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -357,7 +295,7 @@ export function ExpenseForm() {
         </div>
       </div>
 
-      {/* Amount (Smart Calculator & Keypad Style Input) */}
+      {/* Amount (Keypad Style Input) */}
       <div className="space-y-2">
         <div className="flex justify-between items-center">
           <Label htmlFor="amount">金額 (¥)</Label>
@@ -367,40 +305,16 @@ export function ExpenseForm() {
           </span>
         </div>
 
-        <div className="relative">
-          <Input
-            id="amount"
-            type="text"
-            inputMode="decimal"
-            placeholder="0 (例: 120+350)"
-            value={amountRawInput}
-            required
-            onChange={(e) => handleAmountChange(e.target.value)}
-            onBlur={handleAmountBlur}
-            className="text-3xl text-right font-bold h-20 placeholder:text-muted-foreground/40 rounded-2xl pr-4 shadow-inner tracking-wider"
-          />
-          {/* Live Math Expression Calculation Preview */}
-          {calculatedPreview !== null && (
-            <div className="absolute left-3 bottom-2.5 text-xs font-semibold px-2 py-1 bg-primary/10 text-primary rounded-lg animate-in fade-in">
-              = ¥{calculatedPreview.toLocaleString()}
-            </div>
-          )}
-        </div>
-
-        {/* Quick Addition Chips */}
-        <div className="flex items-center gap-2 pt-1 overflow-x-auto pb-1 no-scrollbar">
-          <span className="text-xs text-muted-foreground whitespace-nowrap pl-1">加算:</span>
-          {[100, 500, 1000, 5000].map((addVal) => (
-            <button
-              key={addVal}
-              type="button"
-              onClick={() => handleQuickAdd(addVal)}
-              className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-secondary/80 hover:bg-secondary active:scale-95 text-secondary-foreground border transition-all whitespace-nowrap"
-            >
-              +{addVal.toLocaleString()}
-            </button>
-          ))}
-        </div>
+        <Input
+          id="amount"
+          type="number"
+          inputMode="numeric"
+          placeholder="0"
+          value={formData.amount === 0 ? "" : formData.amount}
+          required
+          onChange={(e) => setFormData({ ...formData, amount: Number(e.target.value) })}
+          className="text-4xl text-right font-bold h-20 placeholder:text-muted-foreground/40 rounded-2xl shadow-inner tracking-wider"
+        />
       </div>
 
       {/* Category Dropdown & Quick Preset Chips */}
