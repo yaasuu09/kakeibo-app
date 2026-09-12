@@ -73,3 +73,51 @@ export function formatPayload(data: ExpenseFormData): Payload {
     settled,
   ];
 }
+
+export const DRAFT_STORAGE_KEY = "kakeibo_expense_draft";
+
+/**
+ * Sends payload to GAS with exponential backoff retries.
+ */
+export async function sendExpenseWithRetry(
+  url: string,
+  payload: Payload,
+  maxRetries = 3,
+  onRetry?: (attempt: number, error: any) => void
+): Promise<{ status: string; message: string }> {
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTPエラー (${response.status})`);
+      }
+
+      const resData = await response.json();
+      if (resData.status === "error") {
+        throw new Error("GAS側エラー: " + (resData.message || "処理に失敗しました"));
+      }
+
+      return resData;
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        if (onRetry) {
+          onRetry(attempt, err);
+        }
+        // 指数バックオフ (1秒, 2秒...)
+        await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+      }
+    }
+  }
+
+  throw lastError || new Error("ネットワーク通信に失敗しました。電波の良い場所で再試行してください。");
+}
