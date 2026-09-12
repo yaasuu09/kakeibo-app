@@ -214,14 +214,12 @@ export function ExpenseForm() {
 
   // Dynamically sort items by user's actual usage frequency
   const sortedCategories = sortItemsByUsage(categories, usageStats.categories);
-  const topCategories = sortedCategories.slice(0, 6);
-  // Exclude quick-chip categories from dropdown to avoid duplicate items
-  const remainingCategories = sortedCategories.filter((cat) => !topCategories.includes(cat));
+  // Show top frequently used categories as quick chips (up to 4 items)
+  const topCategories = sortedCategories.slice(0, 4);
 
   const sortedStores = sortItemsByUsage(stores, usageStats.stores);
+  // Show top frequently used stores as quick chips (up to 6 items)
   const topStores = sortedStores.slice(0, 6);
-  // Exclude quick-chip stores from combobox dropdown to avoid duplicate items
-  const remainingStores = sortedStores.filter((store) => !topStores.includes(store));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto p-4 animate-in fade-in duration-500">
@@ -370,7 +368,7 @@ export function ExpenseForm() {
           </div>
         )}
 
-        {/* Dropdown containing only remaining categories (No duplicates!) */}
+        {/* Category Dropdown (All categories sorted by usage frequency) */}
         <Select
           required
           value={formData.category}
@@ -378,10 +376,10 @@ export function ExpenseForm() {
           disabled={isLoading}
         >
           <SelectTrigger className="h-14 text-lg">
-            <SelectValue placeholder={isLoading ? "読み込み中..." : "その他のカテゴリから選択"} />
+            <SelectValue placeholder={isLoading ? "読み込み中..." : "カテゴリを選択"} />
           </SelectTrigger>
           <SelectContent>
-            {remainingCategories.map((cat) => (
+            {sortedCategories.map((cat) => (
               <SelectItem key={cat} value={cat} className="text-lg py-3">
                 {cat}
               </SelectItem>
@@ -425,9 +423,9 @@ export function ExpenseForm() {
           </div>
         )}
 
-        {/* Combobox with only remaining stores to eliminate duplicates */}
+        {/* Combobox with all stores sorted by usage frequency */}
         <StoreCombobox
-          options={remainingStores}
+          options={sortedStores}
           value={formData.store || ""}
           onChange={(val) => setFormData({ ...formData, store: val })}
           isLoading={isLoading}
