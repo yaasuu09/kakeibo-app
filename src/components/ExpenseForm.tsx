@@ -15,7 +15,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { StoreCombobox } from "@/components/StoreCombobox";
 import {
   Select,
   SelectContent,
@@ -49,6 +48,7 @@ export function ExpenseForm() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isDraftRestored, setIsDraftRestored] = useState(false);
+  const [isCustomStore, setIsCustomStore] = useState(false);
   
   const [categories, setCategories] = useState<string[]>([]);
   const [stores, setStores] = useState<string[]>([]);
@@ -133,6 +133,15 @@ export function ExpenseForm() {
     fetchData();
   }, [endpointURL]);
 
+  // 4. If restored draft has a custom store not in master list, switch to custom mode automatically
+  useEffect(() => {
+    if (!isLoading && stores.length > 0 && formData.store) {
+      if (!stores.includes(formData.store)) {
+        setIsCustomStore(true);
+      }
+    }
+  }, [isLoading, stores, formData.store]);
+
   // Clear draft and reset form
   const handleClearDraft = () => {
     triggerHaptic(20);
@@ -140,6 +149,7 @@ export function ExpenseForm() {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
     }
     setIsDraftRestored(false);
+    setIsCustomStore(false);
     setErrorMessage(null);
     setFormData((prev) => ({
       date: getTodayJST(),
@@ -182,6 +192,7 @@ export function ExpenseForm() {
       triggerHaptic(40);
       setSuccess(true);
       setIsDraftRestored(false);
+      setIsCustomStore(false);
       
       if (typeof window !== "undefined") {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -209,6 +220,19 @@ export function ExpenseForm() {
       setIsSubmitting(false);
       setRetryStatus(null);
     }
+  };
+
+  const handleStoreSelect = (val: string | null) => {
+    if (!val) return;
+    if (val === "__CUSTOM__") {
+      triggerHaptic(10);
+      setIsCustomStore(true);
+      setFormData((prev) => ({ ...prev, store: "" }));
+      return;
+    }
+    triggerHaptic(10);
+    setIsCustomStore(false);
+    setFormData((prev) => ({ ...prev, store: val }));
   };
 
   // Dynamically sort items by user's actual usage frequency
@@ -422,13 +446,14 @@ export function ExpenseForm() {
         {topStores.length > 0 && (
           <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
             {topStores.map((store) => {
-              const isSelected = formData.store === store;
+              const isSelected = !isCustomStore && formData.store === store;
               return (
-				        <button
+                <button
                   key={store}
                   type="button"
                   onClick={() => {
                     triggerHaptic(10);
+                    setIsCustomStore(false);
                     setFormData({ ...formData, store });
                   }}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap border ${
@@ -444,14 +469,84 @@ export function ExpenseForm() {
           </div>
         )}
 
-        {/* Combobox with remaining stores, full search support via allOptions */}
-        <StoreCombobox
-          options={remainingStores}
-          allOptions={sortedStores}
-          value={formData.store || ""}
-          onChange={(val) => setFormData({ ...formData, store: val })}
-          isLoading={isLoading}
-        />
+        {/* Store Dropdown (Select) or Direct Text Input */}
+        {isCustomStore ? (
+          <div className="space-y-1.5 animate-in fade-in duration-200">
+            <div className="flex gap-2">
+              <Input
+                id="store"
+                type="text"
+                autoFocus
+                placeholder="店舗名を入力（例: 〇〇スーパー）"
+                value={formData.store}
+                onChange={(e) => setFormData({ ...formData, store: e.target.value })}
+                className="text-lg h-14"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  triggerHaptic(10);
+                  setIsCustomStore(false);
+                  setFormData((prev) => ({ ...prev, store: "" }));
+                }}
+                className="h-14 px-4 text-sm font-medium whitespace-nowrap"
+              >
+                一覧に戻す
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Select
+              value={formData.store}
+              onValueChange={handleStoreSelect}
+              disabled={isLoading}
+            >
+              <SelectTrigger className="h-14 text-lg">
+                <span
+                  className={
+                    formData.store
+                      ? "text-foreground font-semibold truncate text-left flex-1"
+                      : "text-muted-foreground truncate text-left flex-1"
+                  }
+                >
+                  {formData.store
+                    ? topStores.includes(formData.store)
+                      ? `${formData.store} (上部チップ)`
+                      : formData.store
+                    : isLoading
+                    ? "読み込み中..."
+                    : "その他の店舗から選択"}
+                </span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__CUSTOM__" className="text-lg py-3 font-semibold text-primary">
+                  ✏️ 新しい店舗を直接入力...
+                </SelectItem>
+                {remainingStores.map((store) => (
+                  <SelectItem key={store} value={store} className="text-lg py-3">
+                    {store}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(10);
+                  setIsCustomStore(true);
+                  setFormData((prev) => ({ ...prev, store: "" }));
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1"
+              >
+                ✏️ 一覧にない店舗を手入力する
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Memo */}
