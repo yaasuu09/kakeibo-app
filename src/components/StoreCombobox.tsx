@@ -14,13 +14,13 @@ export function StoreCombobox({ options, value, onChange, isLoading }: StoreComb
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
+    function handleClickOutside(event: Event) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setOpen(false);
       }
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("pointerdown", handleClickOutside);
+    return () => document.removeEventListener("pointerdown", handleClickOutside);
   }, []);
 
   const filtered = options.filter((opt) => opt.toLowerCase().includes(search.toLowerCase()));
@@ -67,7 +67,7 @@ export function StoreCombobox({ options, value, onChange, isLoading }: StoreComb
               <button
                 type="button"
                 onClick={() => handleSelect(search)}
-                className="relative flex w-full cursor-default select-none items-center rounded-sm py-3 px-2 text-lg outline-none hover:bg-accent hover:text-accent-foreground text-blue-600 font-medium"
+                className="relative flex w-full cursor-default select-none items-center rounded-sm py-3 px-2 text-lg outline-none hover:bg-accent hover:text-accent-foreground text-blue-600 dark:text-blue-400 font-medium"
               >
                 「{search}」を新しく追加する
               </button>
