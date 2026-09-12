@@ -89,14 +89,14 @@ export async function sendExpenseWithRetry(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
       const response = await fetch(url, {
         method: "POST",
         body: JSON.stringify(payload),
         headers: {
-          "Content-Type": "text/plain;charset=utf-8",
+          "Content-Type": "application/json",
         },
         signal: controller.signal,
       });

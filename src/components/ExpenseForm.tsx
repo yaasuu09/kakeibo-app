@@ -111,8 +111,8 @@ export function ExpenseForm() {
   const [stores, setStores] = useState<string[]>(DEFAULT_STORES);
   const isInitialized = useRef(false);
 
-  // GAS Web App URL
-  const endpointURL = "https://script.google.com/macros/s/AKfycbyqMMwjGFmRqwEN8AT_NJnIGPWCDOddlfSrCfFdxBy0dX5k2XI9hCIlXhNqxTHv4Qu3/exec";
+  // Next.js internal API Route (Proxies to GAS on server-side with zero CORS/redirect issues)
+  const endpointURL = "/api/expense";
 
   // 1. Initial Mount: Load cached master & restore draft
   useEffect(() => {
