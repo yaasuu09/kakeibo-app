@@ -166,3 +166,54 @@ export function evaluateMathExpression(input: string): number | null {
     return null;
   }
 }
+
+export const USAGE_STORAGE_KEY = "kakeibo_usage_counts";
+
+export type UsageStats = {
+  categories: Record<string, number>;
+  stores: Record<string, number>;
+};
+
+export function getUsageStats(): UsageStats {
+  if (typeof window === "undefined") return { categories: {}, stores: {} };
+  try {
+    const raw = localStorage.getItem(USAGE_STORAGE_KEY);
+    if (!raw) return { categories: {}, stores: {} };
+    const parsed = JSON.parse(raw);
+    return {
+      categories: parsed.categories || {},
+      stores: parsed.stores || {},
+    };
+  } catch {
+    return { categories: {}, stores: {} };
+  }
+}
+
+export function recordUsage(category: string, store: string): UsageStats {
+  const current = getUsageStats();
+  if (category) {
+    current.categories[category] = (current.categories[category] || 0) + 1;
+  }
+  if (store) {
+    current.stores[store] = (current.stores[store] || 0) + 1;
+  }
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(current));
+    } catch (e) {
+      console.warn("Failed to save usage stats", e);
+    }
+  }
+  return current;
+}
+
+export function sortItemsByUsage(items: string[], usageMap: Record<string, number>): string[] {
+  return [...items].sort((a, b) => {
+    const countA = usageMap[a] || 0;
+    const countB = usageMap[b] || 0;
+    if (countB !== countA) {
+      return countB - countA; // 降順
+    }
+    return 0; // 同率なら元の順序を維持
+  });
+}

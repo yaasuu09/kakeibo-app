@@ -7,6 +7,10 @@ import {
   ExpenseFormData,
   sendExpenseWithRetry,
   DRAFT_STORAGE_KEY,
+  getUsageStats,
+  recordUsage,
+  sortItemsByUsage,
+  UsageStats,
 } from "@/lib/logic";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,15 +54,18 @@ export function ExpenseForm() {
   const [categories, setCategories] = useState<string[]>([]);
   const [stores, setStores] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [usageStats, setUsageStats] = useState<UsageStats>({ categories: {}, stores: {} });
   const isInitialized = useRef(false);
 
   // GAS Web App URL
   const endpointURL = "https://script.google.com/macros/s/AKfycbyqMMwjGFmRqwEN8AT_NJnIGPWCDOddlfSrCfFdxBy0dX5k2XI9hCIlXhNqxTHv4Qu3/exec";
 
-  // 1. Initial Mount: Restore draft if available, otherwise restore last selected payer
+  // 1. Initial Mount: Restore draft & usage stats, otherwise restore last selected payer
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
+        setUsageStats(getUsageStats());
+
         const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
         if (savedDraft) {
           const parsed = JSON.parse(savedDraft);
@@ -79,7 +86,7 @@ export function ExpenseForm() {
           }
         }
       } catch (e) {
-        console.warn("Failed to load draft from localStorage", e);
+        console.warn("Failed to load draft or usage stats from localStorage", e);
       } finally {
         isInitialized.current = true;
       }
@@ -169,7 +176,10 @@ export function ExpenseForm() {
         }
       );
       
-      // Successfully submitted! Clear draft & reset form
+      // Successfully submitted! Record usage frequency to auto-rank favorites
+      const updatedStats = recordUsage(formData.category, formData.store);
+      setUsageStats(updatedStats);
+
       triggerHaptic(40);
       setSuccess(true);
       setIsDraftRestored(false);
@@ -201,9 +211,16 @@ export function ExpenseForm() {
     }
   };
 
-  // Top quick suggestions (categories and stores)
-  const topCategories = categories.slice(0, 6);
-  const topStores = stores.slice(0, 6);
+  // Dynamically sort items by user's actual usage frequency
+  const sortedCategories = sortItemsByUsage(categories, usageStats.categories);
+  const topCategories = sortedCategories.slice(0, 6);
+  // Exclude quick-chip categories from dropdown to avoid duplicate items
+  const remainingCategories = sortedCategories.filter((cat) => !topCategories.includes(cat));
+
+  const sortedStores = sortItemsByUsage(stores, usageStats.stores);
+  const topStores = sortedStores.slice(0, 6);
+  // Exclude quick-chip stores from combobox dropdown to avoid duplicate items
+  const remainingStores = sortedStores.filter((store) => !topStores.includes(store));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto p-4 animate-in fade-in duration-500">
@@ -319,9 +336,14 @@ export function ExpenseForm() {
 
       {/* Category Dropdown & Quick Preset Chips */}
       <div className="space-y-2">
-        <Label htmlFor="category">カテゴリ</Label>
+        <div className="flex justify-between items-center">
+          <Label htmlFor="category">カテゴリ</Label>
+          {topCategories.length > 0 && (
+            <span className="text-xs text-muted-foreground">よく使う順</span>
+          )}
+        </div>
 
-        {/* Quick Category Chips */}
+        {/* Quick Category Chips (Auto-ranked by frequency) */}
         {topCategories.length > 0 && (
           <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
             {topCategories.map((cat) => {
@@ -347,6 +369,7 @@ export function ExpenseForm() {
           </div>
         )}
 
+        {/* Dropdown containing only remaining categories (No duplicates!) */}
         <Select
           required
           value={formData.category}
@@ -354,10 +377,10 @@ export function ExpenseForm() {
           disabled={isLoading}
         >
           <SelectTrigger className="h-14 text-lg">
-            <SelectValue placeholder={isLoading ? "読み込み中..." : "その他のカテゴリを選択"} />
+            <SelectValue placeholder={isLoading ? "読み込み中..." : "その他のカテゴリから選択"} />
           </SelectTrigger>
           <SelectContent>
-            {categories.map((cat) => (
+            {remainingCategories.map((cat) => (
               <SelectItem key={cat} value={cat} className="text-lg py-3">
                 {cat}
               </SelectItem>
@@ -368,9 +391,14 @@ export function ExpenseForm() {
 
       {/* Store & Quick Store Chips */}
       <div className="space-y-2">
-        <Label htmlFor="store">購入先 / 店名</Label>
+        <div className="flex justify-between items-center">
+          <Label htmlFor="store">購入先 / 店名</Label>
+          {topStores.length > 0 && (
+            <span className="text-xs text-muted-foreground">よく行く順</span>
+          )}
+        </div>
 
-        {/* Quick Store Chips */}
+        {/* Quick Store Chips (Auto-ranked by frequency) */}
         {topStores.length > 0 && (
           <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
             {topStores.map((store) => {
@@ -396,8 +424,9 @@ export function ExpenseForm() {
           </div>
         )}
 
+        {/* Combobox with only remaining stores to eliminate duplicates */}
         <StoreCombobox
-          options={stores}
+          options={remainingStores}
           value={formData.store || ""}
           onChange={(val) => setFormData({ ...formData, store: val })}
           isLoading={isLoading}
