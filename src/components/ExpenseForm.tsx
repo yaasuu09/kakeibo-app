@@ -7,19 +7,17 @@ import {
   ExpenseFormData,
   sendExpenseWithRetry,
   DRAFT_STORAGE_KEY,
-  getUsageStats,
-  recordUsage,
-  sortItemsByUsage,
-  UsageStats,
 } from "@/lib/logic";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StoreCombobox } from "@/components/StoreCombobox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 
 // Helper for haptic vibration feedback on mobile
@@ -32,6 +30,66 @@ function triggerHaptic(duration = 12) {
     }
   }
 }
+
+// Built-in defaults so UI renders instantly with zero loading delay
+const DEFAULT_CATEGORIES = [
+  "食費",
+  "割り勘",
+  "泰雅立替",
+  "両親立替",
+  "泰雅財布入金",
+  "泰雅精算ログ",
+  "泰孝100％計上",
+  "沙紀100％計上",
+];
+
+const DEFAULT_STORES = [
+  "Amazon",
+  "サミットストア",
+  "サブスク",
+  "マルエツ",
+  "FUJI",
+  "イオン",
+  "横浜市立大学附属病院",
+  "泰雅運動",
+  "移動関係",
+  "メルカリ",
+  "ローソン",
+  "コストコホールセール",
+  "ライフ",
+  "イトマンスイミングスクール",
+  "まいばすけっと",
+  "RIZIN",
+  "コーナン産直館",
+  "ローソン・スリーエフ",
+  "povo",
+  "業務スーパー",
+  "キャップスクリニック",
+  "ファンタジーキッズリゾート",
+  "魚丼",
+  "食品館あおば",
+  "Yahoo!ショッピング",
+  "DAISO",
+  "JAF",
+  "あそびマーレ",
+  "イオシス",
+  "イトーヨーカドー",
+  "サーティワン アイスクリーム",
+  "トヨパーク",
+  "モスバーガー",
+  "やきとり本舗ハマケイ",
+  "格闘技",
+  "岩井保育園",
+  "娯楽",
+  "児童手当",
+  "川戸農園",
+  "祖父母",
+  "農協",
+  "無印良品",
+];
+
+const CACHE_KEY_CATEGORIES = "kakeibo_cached_categories";
+const CACHE_KEY_STORES = "kakeibo_cached_stores";
 
 export function ExpenseForm() {
   const [formData, setFormData] = useState<ExpenseFormData>({
@@ -48,22 +106,28 @@ export function ExpenseForm() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isDraftRestored, setIsDraftRestored] = useState(false);
-  const [isCustomStore, setIsCustomStore] = useState(false);
   
-  const [categories, setCategories] = useState<string[]>([]);
-  const [stores, setStores] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [usageStats, setUsageStats] = useState<UsageStats>({ categories: {}, stores: {} });
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [stores, setStores] = useState<string[]>(DEFAULT_STORES);
   const isInitialized = useRef(false);
 
   // GAS Web App URL
   const endpointURL = "https://script.google.com/macros/s/AKfycbyqMMwjGFmRqwEN8AT_NJnIGPWCDOddlfSrCfFdxBy0dX5k2XI9hCIlXhNqxTHv4Qu3/exec";
 
-  // 1. Initial Mount: Restore draft & usage stats, otherwise restore last selected payer
+  // 1. Initial Mount: Load cached master & restore draft
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        setUsageStats(getUsageStats());
+        const cachedCats = localStorage.getItem(CACHE_KEY_CATEGORIES);
+        if (cachedCats) {
+          const parsed = JSON.parse(cachedCats);
+          if (Array.isArray(parsed) && parsed.length > 0) setCategories(parsed);
+        }
+        const cachedSts = localStorage.getItem(CACHE_KEY_STORES);
+        if (cachedSts) {
+          const parsed = JSON.parse(cachedSts);
+          if (Array.isArray(parsed) && parsed.length > 0) setStores(parsed);
+        }
 
         const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
         if (savedDraft) {
@@ -85,7 +149,7 @@ export function ExpenseForm() {
           }
         }
       } catch (e) {
-        console.warn("Failed to load draft or usage stats from localStorage", e);
+        console.warn("Failed to load draft or cache from localStorage", e);
       } finally {
         isInitialized.current = true;
       }
@@ -108,39 +172,35 @@ export function ExpenseForm() {
     }
   }, [formData]);
 
-  // 3. Fetch categories and stores from GAS Master
+  // 3. Background Sync: Fetch latest categories and stores from GAS Master silently
   useEffect(() => {
     async function fetchData() {
       try {
-        const fetchUrl = `${endpointURL}?t=${Date.now()}`;
-        const res = await fetch(fetchUrl, {
+        const res = await fetch(endpointURL, {
           redirect: "follow",
         });
         
-        if (!res.ok) throw new Error("Failed to fetch options");
+        if (!res.ok) return;
         
         const data = await res.json();
-        if (data.categories) setCategories(data.categories);
-        if (data.stores) setStores(data.stores);
+        if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+          setCategories(data.categories);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(CACHE_KEY_CATEGORIES, JSON.stringify(data.categories));
+          }
+        }
+        if (data.stores && Array.isArray(data.stores) && data.stores.length > 0) {
+          setStores(data.stores);
+          if (typeof window !== "undefined") {
+            localStorage.setItem(CACHE_KEY_STORES, JSON.stringify(data.stores));
+          }
+        }
       } catch (err) {
-        console.warn("Options fetch failed smoothly, falling back to manual input:", err);
-        setCategories([]);
-        setStores([]);
-      } finally {
-        setIsLoading(false);
+        console.warn("Background master sync completed smoothly (offline/fallback used):", err);
       }
     }
     fetchData();
   }, [endpointURL]);
-
-  // 4. If restored draft has a custom store not in master list, switch to custom mode automatically
-  useEffect(() => {
-    if (!isLoading && stores.length > 0 && formData.store) {
-      if (!stores.includes(formData.store)) {
-        setIsCustomStore(true);
-      }
-    }
-  }, [isLoading, stores, formData.store]);
 
   // Clear draft and reset form
   const handleClearDraft = () => {
@@ -149,7 +209,6 @@ export function ExpenseForm() {
       localStorage.removeItem(DRAFT_STORAGE_KEY);
     }
     setIsDraftRestored(false);
-    setIsCustomStore(false);
     setErrorMessage(null);
     setFormData((prev) => ({
       date: getTodayJST(),
@@ -185,14 +244,9 @@ export function ExpenseForm() {
         }
       );
       
-      // Successfully submitted! Record usage frequency to auto-rank favorites
-      const updatedStats = recordUsage(formData.category, formData.store);
-      setUsageStats(updatedStats);
-
       triggerHaptic(40);
       setSuccess(true);
       setIsDraftRestored(false);
-      setIsCustomStore(false);
       
       if (typeof window !== "undefined") {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -221,30 +275,6 @@ export function ExpenseForm() {
       setRetryStatus(null);
     }
   };
-
-  const handleStoreSelect = (val: string | null) => {
-    if (!val) return;
-    if (val === "__CUSTOM__") {
-      triggerHaptic(10);
-      setIsCustomStore(true);
-      setFormData((prev) => ({ ...prev, store: "" }));
-      return;
-    }
-    triggerHaptic(10);
-    setIsCustomStore(false);
-    setFormData((prev) => ({ ...prev, store: val }));
-  };
-
-  // Dynamically sort items by user's actual usage frequency
-  const sortedCategories = sortItemsByUsage(categories, usageStats.categories);
-  // Show top frequently used categories as quick chips (up to 4 items)
-  const topCategories = sortedCategories.slice(0, 4);
-  const remainingCategories = sortedCategories.filter((cat) => !topCategories.includes(cat));
-
-  const sortedStores = sortItemsByUsage(stores, usageStats.stores);
-  // Show top frequently used stores as quick chips (up to 6 items)
-  const topStores = sortedStores.slice(0, 6);
-  const remainingStores = sortedStores.filter((store) => !topStores.includes(store));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto p-4 animate-in fade-in duration-500">
@@ -358,195 +388,35 @@ export function ExpenseForm() {
         />
       </div>
 
-      {/* Category Dropdown & Quick Preset Chips */}
+      {/* Category Dropdown */}
       <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <Label htmlFor="category">カテゴリ</Label>
-          {topCategories.length > 0 && (
-            <span className="text-xs text-muted-foreground">よく使う順</span>
-          )}
-        </div>
-
-        {/* Quick Category Chips (Auto-ranked by frequency) */}
-        {topCategories.length > 0 && (
-          <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
-            {topCategories.map((cat) => {
-              const isSelected = formData.category === cat;
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => {
-                    triggerHaptic(10);
-                    setFormData({ ...formData, category: cat });
-                  }}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap border ${
-                    isSelected
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-muted/60 text-muted-foreground hover:bg-muted border-transparent hover:text-foreground"
-                  }`}
-                >
-                  {cat}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Category Dropdown (Other categories excluding quick chips) */}
+        <Label htmlFor="category">カテゴリ</Label>
         <Select
           required
           value={formData.category}
           onValueChange={(val: string | null) => setFormData({ ...formData, category: val || "" })}
-          disabled={isLoading}
         >
           <SelectTrigger className="h-14 text-lg">
-            <span
-              className={
-                formData.category
-                  ? "text-foreground font-semibold truncate text-left flex-1"
-                  : "text-muted-foreground truncate text-left flex-1"
-              }
-            >
-              {formData.category
-                ? topCategories.includes(formData.category)
-                  ? `${formData.category} (上部チップ)`
-                  : formData.category
-                : isLoading
-                ? "読み込み中..."
-                : "その他のカテゴリから選択"}
-            </span>
+            <SelectValue placeholder="カテゴリを選択" />
           </SelectTrigger>
           <SelectContent>
-            {remainingCategories.length === 0 ? (
-              <div className="py-4 text-center text-sm text-muted-foreground">
-                その他のカテゴリはありません
-              </div>
-            ) : (
-              remainingCategories.map((cat) => (
-                <SelectItem key={cat} value={cat} className="text-lg py-3">
-                  {cat}
-                </SelectItem>
-              ))
-            )}
+            {categories.map((cat) => (
+              <SelectItem key={cat} value={cat} className="text-lg py-3">
+                {cat}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
 
-      {/* Store & Quick Store Chips */}
+      {/* Store */}
       <div className="space-y-2">
-        <div className="flex justify-between items-center">
-          <Label htmlFor="store">購入先 / 店名</Label>
-          {topStores.length > 0 && (
-            <span className="text-xs text-muted-foreground">よく行く順</span>
-          )}
-        </div>
-
-        {/* Quick Store Chips (Auto-ranked by frequency) */}
-        {topStores.length > 0 && (
-          <div className="flex gap-1.5 overflow-x-auto pb-1.5 no-scrollbar">
-            {topStores.map((store) => {
-              const isSelected = !isCustomStore && formData.store === store;
-              return (
-                <button
-                  key={store}
-                  type="button"
-                  onClick={() => {
-                    triggerHaptic(10);
-                    setIsCustomStore(false);
-                    setFormData({ ...formData, store });
-                  }}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition-all whitespace-nowrap border ${
-                    isSelected
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-muted/60 text-muted-foreground hover:bg-muted border-transparent hover:text-foreground"
-                  }`}
-                >
-                  {store}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Store Dropdown (Select) or Direct Text Input */}
-        {isCustomStore ? (
-          <div className="space-y-1.5 animate-in fade-in duration-200">
-            <div className="flex gap-2">
-              <Input
-                id="store"
-                type="text"
-                autoFocus
-                placeholder="店舗名を入力（例: 〇〇スーパー）"
-                value={formData.store}
-                onChange={(e) => setFormData({ ...formData, store: e.target.value })}
-                className="text-lg h-14"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  triggerHaptic(10);
-                  setIsCustomStore(false);
-                  setFormData((prev) => ({ ...prev, store: "" }));
-                }}
-                className="h-14 px-4 text-sm font-medium whitespace-nowrap"
-              >
-                一覧に戻す
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-1.5">
-            <Select
-              value={formData.store}
-              onValueChange={handleStoreSelect}
-              disabled={isLoading}
-            >
-              <SelectTrigger className="h-14 text-lg">
-                <span
-                  className={
-                    formData.store
-                      ? "text-foreground font-semibold truncate text-left flex-1"
-                      : "text-muted-foreground truncate text-left flex-1"
-                  }
-                >
-                  {formData.store
-                    ? topStores.includes(formData.store)
-                      ? `${formData.store} (上部チップ)`
-                      : formData.store
-                    : isLoading
-                    ? "読み込み中..."
-                    : "その他の店舗から選択"}
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__CUSTOM__" className="text-lg py-3 font-semibold text-primary">
-                  ✏️ 新しい店舗を直接入力...
-                </SelectItem>
-                {remainingStores.map((store) => (
-                  <SelectItem key={store} value={store} className="text-lg py-3">
-                    {store}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  triggerHaptic(10);
-                  setIsCustomStore(true);
-                  setFormData((prev) => ({ ...prev, store: "" }));
-                }}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1"
-              >
-                ✏️ 一覧にない店舗を手入力する
-              </button>
-            </div>
-          </div>
-        )}
+        <Label htmlFor="store">購入先 / 店名</Label>
+        <StoreCombobox
+          options={stores}
+          value={formData.store || ""}
+          onChange={(val) => setFormData({ ...formData, store: val })}
+        />
       </div>
 
       {/* Memo */}
