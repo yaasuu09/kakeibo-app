@@ -3,12 +3,13 @@ import { ChevronDown, Search, X } from "lucide-react";
 
 interface StoreComboboxProps {
   options: string[];
+  allOptions?: string[];
   value: string;
   onChange: (val: string) => void;
   isLoading?: boolean;
 }
 
-export function StoreCombobox({ options, value, onChange, isLoading }: StoreComboboxProps) {
+export function StoreCombobox({ options, allOptions, value, onChange, isLoading }: StoreComboboxProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,7 +24,8 @@ export function StoreCombobox({ options, value, onChange, isLoading }: StoreComb
     return () => document.removeEventListener("pointerdown", handleClickOutside);
   }, []);
 
-  const filtered = options.filter((opt) => opt.toLowerCase().includes(search.toLowerCase()));
+  const searchPool = search.trim() ? (allOptions || options) : options;
+  const filtered = searchPool.filter((opt) => opt.toLowerCase().includes(search.toLowerCase()));
 
   const handleSelect = (val: string) => {
     onChange(val);
@@ -63,7 +65,7 @@ export function StoreCombobox({ options, value, onChange, isLoading }: StoreComb
             )}
           </div>
           <div className="max-h-[250px] overflow-y-auto p-1">
-            {search && !options.includes(search) && (
+            {search && !searchPool.includes(search) && (
               <button
                 type="button"
                 onClick={() => handleSelect(search)}

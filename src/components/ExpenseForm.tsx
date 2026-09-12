@@ -21,7 +21,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 
 // Helper for haptic vibration feedback on mobile
@@ -216,10 +215,12 @@ export function ExpenseForm() {
   const sortedCategories = sortItemsByUsage(categories, usageStats.categories);
   // Show top frequently used categories as quick chips (up to 4 items)
   const topCategories = sortedCategories.slice(0, 4);
+  const remainingCategories = sortedCategories.filter((cat) => !topCategories.includes(cat));
 
   const sortedStores = sortItemsByUsage(stores, usageStats.stores);
   // Show top frequently used stores as quick chips (up to 6 items)
   const topStores = sortedStores.slice(0, 6);
+  const remainingStores = sortedStores.filter((store) => !topStores.includes(store));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto p-4 animate-in fade-in duration-500">
@@ -368,7 +369,7 @@ export function ExpenseForm() {
           </div>
         )}
 
-        {/* Category Dropdown (All categories sorted by usage frequency) */}
+        {/* Category Dropdown (Other categories excluding quick chips) */}
         <Select
           required
           value={formData.category}
@@ -376,14 +377,34 @@ export function ExpenseForm() {
           disabled={isLoading}
         >
           <SelectTrigger className="h-14 text-lg">
-            <SelectValue placeholder={isLoading ? "読み込み中..." : "カテゴリを選択"} />
+            <span
+              className={
+                formData.category
+                  ? "text-foreground font-semibold truncate text-left flex-1"
+                  : "text-muted-foreground truncate text-left flex-1"
+              }
+            >
+              {formData.category
+                ? topCategories.includes(formData.category)
+                  ? `${formData.category} (上部チップ)`
+                  : formData.category
+                : isLoading
+                ? "読み込み中..."
+                : "その他のカテゴリから選択"}
+            </span>
           </SelectTrigger>
           <SelectContent>
-            {sortedCategories.map((cat) => (
-              <SelectItem key={cat} value={cat} className="text-lg py-3">
-                {cat}
-              </SelectItem>
-            ))}
+            {remainingCategories.length === 0 ? (
+              <div className="py-4 text-center text-sm text-muted-foreground">
+                その他のカテゴリはありません
+              </div>
+            ) : (
+              remainingCategories.map((cat) => (
+                <SelectItem key={cat} value={cat} className="text-lg py-3">
+                  {cat}
+                </SelectItem>
+              ))
+            )}
           </SelectContent>
         </Select>
       </div>
@@ -403,7 +424,7 @@ export function ExpenseForm() {
             {topStores.map((store) => {
               const isSelected = formData.store === store;
               return (
-                <button
+				        <button
                   key={store}
                   type="button"
                   onClick={() => {
@@ -423,9 +444,10 @@ export function ExpenseForm() {
           </div>
         )}
 
-        {/* Combobox with all stores sorted by usage frequency */}
+        {/* Combobox with remaining stores, full search support via allOptions */}
         <StoreCombobox
-          options={sortedStores}
+          options={remainingStores}
+          allOptions={sortedStores}
           value={formData.store || ""}
           onChange={(val) => setFormData({ ...formData, store: val })}
           isLoading={isLoading}
