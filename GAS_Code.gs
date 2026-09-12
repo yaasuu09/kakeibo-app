@@ -4,8 +4,6 @@
  * Maps POST JSON payload directly to the "支出記録" sheet.
  */
 
-const SHEET_NAME = "支出記録";
-
 /**
  * Handle HTTP OPTIONS request to allow CORS preflight
  */
@@ -55,9 +53,10 @@ function doPost(e) {
       }
     }
 
-    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+    const targetSheetName = "支出記録";
+    const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(targetSheetName);
     if (!sheet) {
-      return generateResponse({ status: "error", message: `Sheet '${SHEET_NAME}' not found.` });
+      return generateResponse({ status: "error", message: `Sheet '${targetSheetName}' not found.` });
     }
 
     // 2. Find the last row having data in Column B ("日付")
